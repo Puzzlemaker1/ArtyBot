@@ -30,7 +30,7 @@ var (
 var WIND_OFFSETS = [...]int{10, 20, 30, 40, 50}
 
 func init() {
-	flag.Parse()
+	//flag.Parse()
 	var err error
 	s, err = discordgo.New("Bot " + *BotToken)
 	if err != nil {
@@ -241,7 +241,7 @@ func offsetCoord(c coord, dir float64, length int) (offsetCoord coord) {
 	offsetCoord.x = c.x
 	offsetCoord.y = c.y
 	offsetCoord.x += int(math.Cos(dir) * float64(length))
-	offsetCoord.y += int(math.Sin(dir) * float64(length))
+	offsetCoord.y -= int(math.Sin(dir) * float64(length))
 	return
 }
 

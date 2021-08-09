@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 )
 
@@ -65,6 +66,14 @@ func TestCalcArty(t *testing.T) {
 		}
 	}
 
+	c := offsetCoord(coord{0, 0}, 90*(math.Pi/180), 10)
+	if c.y != -10 {
+		t.Fatalf("Bad wind calc for south: %v", c)
+	}
+	c = offsetCoord(coord{0, 0}, 180*(math.Pi/180), 10)
+	if c.x != -10 {
+		t.Fatalf("Bad wind calc for left: %v", c)
+	}
 	//testing.Init()
 
 	/*
