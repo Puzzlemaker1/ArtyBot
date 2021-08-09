@@ -23,10 +23,11 @@ var (
 var s *discordgo.Session
 
 var (
-	TILE_SIZE = 126
+	TILE_SIZE       = 126
 	SMALL_TILE_SIZE = 42
-	WIND_OFFSET = 50.0
 )
+
+var WIND_OFFSETS = [...]int{10, 20, 30, 40, 50}
 
 func init() {
 	flag.Parse()
@@ -69,41 +70,82 @@ var (
 
 		"arty": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			log.Printf("Got a command")
-
-			from := i.ApplicationCommandData().Options[0].StringValue()
-			to := i.ApplicationCommandData().Options[1].StringValue()
+			var response string
 			var wind string
+			var from, to coord
+			var azimuth float64
+			var distance int
+
+			var windString string
+			var windDistString string
+			var windAzString string
+
+			fromString := i.ApplicationCommandData().Options[0].StringValue()
+			from, err := NewCoord(fromString)
+			if err != nil {
+				sendResp("Error when calculating, make sure your inputs are correct.", s, i)
+				return
+			}
+
+			toString := i.ApplicationCommandData().Options[1].StringValue()
+			to, err = NewCoord(toString)
+			if err != nil {
+				sendResp("Error when calculating, make sure your inputs are correct.", s, i)
+				return
+			}
+
+			azimuth, distance, err = calcArty(from, to)
+			if err != nil {
+				sendResp("Error when calculating, make sure your inputs are correct.", s, i)
+				return
+			}
+
 			if len(i.ApplicationCommandData().Options) >= 3 {
 				//We have wind
-				wind = i.ApplicationCommandData().Options[2].StringValue()
-			}
-
-			azimuth, distance, err := calcArty(from, to, wind)
-			var response string
-			if err != nil {
-				response = "Error when calculating, make sure your inputs are correct."
+				wind = strings.ToUpper(i.ApplicationCommandData().Options[2].StringValue())
+				windDir := getWindDir(wind)
+				for _, offset := range WIND_OFFSETS {
+					//Negative offsets since we want to go the opposite way.
+					offsetCoord := offsetCoord(to, windDir, -offset)
+					a, d, err := calcArty(from, offsetCoord)
+					if err != nil {
+						sendResp("Error when calculating, make sure your inputs are correct.", s, i)
+						return
+					}
+					windString += fmt.Sprintf(" %4dM  |", offset)
+					windDistString += fmt.Sprintf(" %5d  |", d)
+					windAzString += fmt.Sprintf(" %5.1f  |", a)
+				}
 			} else {
-				response = fmt.Sprintf(`
-	From: %s
-	To: %s
-	Distance: %d
-	Asimuth:  %d
-`, from, to, distance, azimuth)
+				wind = "none"
 			}
 
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				// Ignore type for now, we'll discuss them in "responses" part
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: response,
-				},
-			})
-		},
+			response = fmt.Sprintf("```\nFrom: %s\nTo:   %s\nWind: %s\n\n"+
+				"-----------------------------------------------------------------------------------\n"+
+				"Wind:      none  | %s\n"+
+				"-----------------------------------------------------------------------------------\n"+
+				"Distance: %5d  | %s\n"+
+				"Asimuth:  %5.1f  | %s\n"+
+				"-----------------------------------------------------------------------------------"+
+				"```", fromString, toString, wind, windString, distance, windDistString, azimuth, windAzString)
 
+			sendResp(response, s, i)
+
+		},
 	}
 )
 
-func numpadToPos(numpad int)  (int, int) {
+func sendResp(response string, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		// Ignore type for now, we'll discuss them in "responses" part
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
+}
+
+func numpadToPos(numpad int) (int, int) {
 	switch numpad {
 	case 7:
 		return -1, -1
@@ -127,132 +169,109 @@ func numpadToPos(numpad int)  (int, int) {
 	return 0, 0
 }
 
-func calcArty(from string, to string, wind string) (azimuth int, distance int, err error) {
-	fromCoords := strings.Split(from, "-")
-	toCoords := strings.Split(to, "-")
-	if len(fromCoords) < 3 || len(toCoords) < 3 {
-		//Um.
-		return
-	}
+type coord struct {
+	x int
+	y int
+}
 
-	xfrom := charToInt(rune(fromCoords[0][0]))
-	yfrom, err := strconv.Atoi(fromCoords[1])
+func NewCoord(rawString string) (c coord, err error) {
+
+	log.Printf("Creating coord: %s", rawString)
+	//Move our starting coord to the center of a tile.
+	c.x = TILE_SIZE / 2
+	c.y = TILE_SIZE / 2
+	splitCoord := strings.Split(rawString, "-")
+
+	c.x += charToInt(rune(splitCoord[0][0])) * TILE_SIZE
+	yInt, err := strconv.Atoi(splitCoord[1])
 	if err != nil {
 		return
 	}
+	c.y += yInt * TILE_SIZE
 
 	var numpadNum int
 
-	var nxFrom, nyFrom int
 	offset := SMALL_TILE_SIZE
-	for i := 2; i < len(fromCoords); i++ {
-		numpadNum, err = strconv.Atoi(fromCoords[i])
+	for i := 2; i < len(splitCoord); i++ {
+		numpadNum, err = strconv.Atoi(splitCoord[i])
 		if err != nil {
 			return
 		}
+		log.Printf("numpad num: %d", numpadNum)
 		x, y := numpadToPos(numpadNum)
-		nxFrom += x * offset
-		nyFrom += y * offset
+		c.x += x * offset
+		c.y += y * offset
 		offset /= 3
 	}
+	//Reverse since foxhole counts downwards.
+	c.y = -c.y
 
-	xto := charToInt(rune(toCoords[0][0]))
-	yto, err := strconv.Atoi(toCoords[1])
-	if err != nil {
-		return
-	}
+	log.Printf("x: %d, y: %d", c.x, c.y)
+	return
 
-	var nxTo, nyTo int
-	offset = SMALL_TILE_SIZE
-	for i := 2; i < len(toCoords); i++ {
-		numpadNum, err = strconv.Atoi(toCoords[i])
-		if err != nil {
-			return
+}
+
+func (c coord) Subtract(s coord) (new coord) {
+	new.x = c.x - s.x
+	new.y = c.y - s.y
+	return
+}
+
+func getWindDir(input string) (dir float64) {
+
+	//Remember, in normal coords to the right is 0.  So we have to take that into account.
+	//We transform it at the end.
+	for _, char := range input {
+		switch char {
+		case 'S':
+			dir += 90 * (math.Pi / 180)
+		case 'W':
+			dir += 180 * (math.Pi / 180)
+		case 'N':
+			dir += 270 * (math.Pi / 180)
+		case 'E':
+			dir += 0
 		}
-		x, y := numpadToPos(numpadNum)
-		nxTo += x * offset
-		nyTo += y * offset
-		offset /= 3
 	}
+	dir /= float64(len(input))
+	return
+}
 
+func offsetCoord(c coord, dir float64, length int) (offsetCoord coord) {
+	offsetCoord.x = c.x
+	offsetCoord.y = c.y
+	offsetCoord.x += int(math.Cos(dir) * float64(length))
+	offsetCoord.y += int(math.Sin(dir) * float64(length))
+	return
+}
 
+func calcArty(from coord, to coord) (azimuth float64, distance int, err error) {
 
+	log.Printf("from: %v, to: %v", from, to)
 
+	//We normalize to from being zero
+	n := to.Subtract(from)
 
-	log.Printf("xfrom: %v, yfrom: %v, xto: %v, yto: %v", xfrom, yfrom, xto, yto)
-	log.Printf("nxfrom: %v, nyfrom: %v, nxto: %v, nyto: %v", nxFrom, nyFrom, nxTo, nyTo)
-
-	//We normalize to meters, not co-ords
-	xfrom *= TILE_SIZE
-	xto *= TILE_SIZE
-	yfrom *= TILE_SIZE
-	yto *= TILE_SIZE
-
-	//Add in our numpad options
-	xfrom += nxFrom
-	yfrom += nyFrom
-	xto += nxTo
-	yto += nyTo
-
-	log.Printf("xfrom: %v, yfrom: %v, xto: %v, yto: %v", xfrom, yfrom, xto, yto)
-	//NOw to calculate wind
-	if wind != "" {
-		var windDir float64
-
-		//Remember, in normal coords to the right is 0.  So we have to take that into account.
-		//We transform it at the end.
-		for _, char := range wind {
-			switch char {
-			case 'S':
-				windDir += 90 * (math.Pi/180)
-			case 'W':
-				windDir += 180 * (math.Pi/180)
-			case 'N':
-				windDir += 270 * (math.Pi/180)
-			case 'E':
-				windDir += 0
-			}
-		}
-		windDir /= float64(len(wind))
-
-		windOffsetX := math.Cos(windDir) * WIND_OFFSET
-		windOffsetY := math.Sin(windDir) * WIND_OFFSET
-
-		//Subtract since we do the opposite.
-		xto -= int(windOffsetX)
-		yto -= int(windOffsetY)
-	}
-	//Because foxhole is weird zero is upper left...
-	yfrom = -yfrom
-	yto = -yto
-
-	//We normalize the "from" coord to zero
-	x := float64(xto - xfrom)
-	y := float64(yto - yfrom)
-
-
-
-	log.Printf("Normalized to zero: %v, %v", x, y)
+	log.Printf("Normalized to zero: %v, %v", n.x, n.y)
 	//A squared plus B squared equals C squared!
-	distance = int(math.Round(math.Abs(math.Sqrt((x * x) + (y * y)))))
-	azimuth = int(math.Atan2(y, x) * (180 / math.Pi))
-
+	distance = int(math.Round(math.Abs(math.Sqrt(float64(n.x*n.x) + float64(n.y*n.y)))))
+	azimuth = math.Atan2(float64(n.y), float64(n.x)) * (180 / math.Pi)
 
 	//Azimuth is off by 90 degrees
 	azimuth -= 90
 
-	azimuth = azimuth % 360
-
 	//This is due to weirdness.  Makes the angles correct.
 	azimuth = -azimuth
-	if azimuth < 0 {
+	for azimuth < 0 {
 		azimuth += 360
 	}
+	//otherwise the printing gets weird....
+	azimuth = math.Abs(azimuth)
 	return
 }
 
 func charToInt(c rune) int {
-	return int(unicode.ToUpper(c) - 'A') + 1
+	return int(unicode.ToUpper(c)-'A') + 1
 }
 
 func init() {
