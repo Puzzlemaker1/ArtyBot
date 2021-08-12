@@ -27,7 +27,7 @@ var (
 	SMALL_TILE_SIZE = 42
 )
 
-var WIND_OFFSETS = [...]int{10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+var WIND_OFFSETS = [...]int{10, 20, 30, 40, 50, 100, 150, 200, 250}
 
 func init() {
 	flag.Parse()
