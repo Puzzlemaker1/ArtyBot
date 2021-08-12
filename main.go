@@ -317,7 +317,7 @@ func main() {
 	}()
 
 	stop := make(chan os.Signal)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	log.Println("Finshed startup")
 	<-stop
 	log.Printf("Shutting down")
