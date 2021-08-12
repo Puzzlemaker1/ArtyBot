@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"syscall"
 )
 
 // Bot parameters
@@ -316,7 +317,7 @@ func main() {
 	}()
 
 	stop := make(chan os.Signal)
-	signal.Notify(stop, os.Interrupt)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	log.Println("Finshed startup")
 	<-stop
 	log.Printf("Shutting down")
