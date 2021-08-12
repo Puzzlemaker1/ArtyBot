@@ -30,7 +30,7 @@ var (
 var WIND_OFFSETS = [...]int{10, 20, 30, 40, 50}
 
 func init() {
-	//flag.Parse()
+	flag.Parse()
 	var err error
 	s, err = discordgo.New("Bot " + *BotToken)
 	if err != nil {
